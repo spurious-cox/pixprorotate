@@ -1,0 +1,12 @@
+# the built app and its intermediates
+dist/
+*.app/
+*.iconset/
+
+# local editing backups
+*.bak-*
+*.reverted-*
+
+# macOS
+.DS_Store
+*.dmg

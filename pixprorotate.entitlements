@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- For the osacompile applets. Notarization requires the hardened
+	     runtime, and the hardened runtime stops an app from ASKING to send
+	     Apple events unless it holds this entitlement.
+
+	     The failure is subtle, which is why this file exists. On a Mac that
+	     already granted the app Automation, everything keeps working after
+	     notarization and nothing looks wrong. On a fresh Mac (a new machine,
+	     or anyone you send the app to) the app cannot prompt, so it fails
+	     with "Not authorized to send Apple events" (error 1743) and never
+	     appears in the Automation list for the user to switch on. There is
+	     no way out of that from the receiving end.
+
+	     Verified on macOS 26 (2026-08-15) with two otherwise identical
+	     signed applets: without this key the event was refused, with it the
+	     event went through.
+
+	     NOTE TO ANYONE EDITING THIS FILE: XML comments cannot contain a
+	     double hyphen. AMFI rejects the whole file with "syntax error" and
+	     codesign then refuses to sign, so use commas or parentheses.
+
+	     Nothing else belongs here. The CPython keys in pixpro.entitlements
+	     (JIT, unsigned executable memory, library validation) are for the
+	     py2app based apps and are meaningless to an applet. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>
