@@ -8,8 +8,17 @@ positively, 0 to 360, so turning a layer a little the other way means dragging
 or typing 350-something every time. PixProRotate fixes that: a small panel that
 turns the selection either direction, and always shows the angle it is at.
 
+### [⬇︎ Download the latest release](https://github.com/spurious-cox/pixprorotate/releases/latest)
+
+Notarized and stapled by Apple — open the DMG and drag PixProRotate to
+Applications, or install it with Homebrew:
+
+```
+brew install --cask spurious-cox/tap/pixprorotate
+```
+
 Requires Pixelmator Pro and macOS 12 or later. Both the 3.x build and the
-Creator Studio build work. Build it from source (see Building below).
+Creator Studio build work.
 
 ## Where 0 starts
 
