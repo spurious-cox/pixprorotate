@@ -3,11 +3,6 @@
 Rotates the selected Pixelmator Pro layers to any angle, positive or negative,
 from the keyboard or by typing a number.
 
-Apple screwed up Pixelmator Pro's rotate control. It starts at 0 and only turns
-positively, 0 to 360, so turning a layer a little the other way means dragging
-or typing 350-something every time. PixProRotate fixes that: a small panel that
-turns the selection either direction, and always shows the angle it is at.
-
 ### [⬇︎ Download the latest release](https://github.com/spurious-cox/pixprorotate/releases/latest)
 
 Notarized and stapled by Apple — open the DMG and drag PixProRotate to
@@ -19,6 +14,18 @@ brew install --cask spurious-cox/tap/pixprorotate
 
 Requires Pixelmator Pro and macOS 12 or later. Both the 3.x build and the
 Creator Studio build work.
+
+## Why this exists
+
+Apple got rotation wrong in Pixelmator Pro. Its rotate control starts at 0 and
+only turns positively, 0 to 360, so turning a layer a little the other way, or
+walking it negatively from 360 down to 0, is slow and tedious. Its numbers also
+count counterclockwise, the opposite of a compass and of how most people read an
+angle.
+
+PixProRotate fixes that: a small panel that turns the selection either
+direction from the keyboard, takes a typed angle, and always shows the angle
+it is at, counted like a compass.
 
 ## Where 0 starts
 
