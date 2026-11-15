@@ -84,26 +84,28 @@ and follows the selection as you change it in Pixelmator Pro. Type a number and
 press Return to set the angle exactly. Negative numbers work: -80 gives 280,
 because angles are kept between 0 and 360.
 
-### Detect, Level and Restore
+### Select, Level, Undo and Restore
 
 Pixelmator Pro reports a drawn diagonal line (or anything imported from SVG) as
 rotation 0, because the angle is in its shape, not in a setting. These buttons
 deal with that, so you can edit an angled item straight and then put it back:
 
-1. **Detect** measures the angle you can actually see. It copies the selected
+1. **Select** (the first button) measures the angle you can actually see. It copies the selected
    layer, finds the long axis of its pixels, and shows the result in the message
-   line, with how far it is from straight. It does not change anything.
+   line, with how far it is from straight. It does not change anything, except that it scrolls the Layers sidebar so the
+   selected item sits nearer the middle instead of at the bottom edge (it briefly
+   selects a layer a few rows below, then selects yours again).
 2. **Level** turns the layer to the nearest horizontal or vertical and
    remembers how far it turned. Now it is easy to edit.
-3. **Undo** (between Level and Restore) sends Command-Z to Pixelmator Pro, for
+3. **Undo** (between Level and Restore) sends Command-Z to Pixelmator Pro (hold **Shift** while pressing it for Shift-Command-Z, redo), for
    when an edit made while the item was leveled needs to be taken back. It works
    like the key, so it can take a moment: be patient and press it once. Undoing
    past Level itself puts the angle out of step with Restore; press **Cancel** then.
 4. **Restore** turns it back by exactly that amount; if the leveled item is no longer selected (you clicked inside the group, say) it tells you so instead of turning something else.
 
-The button to press next is green: Detect, then Level, then Restore, then back
-to Detect. Choosing a preset (0°, 90°, 180°, 270°) turns all the colors off until
-you press Detect again. When nothing is selected, the round is abandoned: the
+The button to press next is green: Select, then Level, then Restore, then back
+to Select. Choosing a preset (0°, 90°, 180°, 270°) turns all the colors off until
+you press Select again. When nothing is selected, the round is abandoned: the
 backup copy of a group is deleted and the saved starting angles are forgotten.
 
 **Cancel** is the way out when changes get out of hand: it puts the selected
@@ -114,7 +116,7 @@ If you select a different layer, that layer's angle becomes the new starting
 point.
 
 **Groups are backed up.** Editing inside a group (a line turned into a curve,
-items moved) changes more than its angle. So when you press Detect or Level on a
+items moved) changes more than its angle. So when you press Select or Level on a
 group, PixProRotate first makes a hidden copy of it right beside it, named
 "PixProRotate backup". Cancel swaps the original back for that copy, whatever you
 changed inside. Cancel also goes red when the group's size, position, rotation or
@@ -124,7 +126,7 @@ hidden copy is saved with it, so delete it by hand if you do not want it. Edits
 that change nothing the copy can compare (for example a path reshaped inside the
 same outline) do not turn Cancel red, but Cancel still restores them.
 
-Detect and Level work on **one layer at a time**. A group counts as one layer,
+Select and Level work on **one layer at a time**. A group counts as one layer,
 so a line made of a shaft and an arrowhead is fine. If several layers are
 selected, a dialog says so; select a single layer, or group the items first.
 Round or square shapes have no clear direction, so Level leaves them alone. Your
@@ -139,7 +141,7 @@ The **0°**, **90°**, **180°** and **270°** buttons set the angle outright.
 
 Every selected layer is turned by the same step, so they keep their relative
 angles. The box shows the first selected layer's angle. The presets and typed
-angles set every selected layer to the same angle. Detect and Level are the
+angles set every selected layer to the same angle. Select and Level are the
 exception: they need a single layer (see above).
 
 ## Permission
@@ -151,7 +153,7 @@ Allow it; that is how it reads and sets layer angles.
 
 * "No layer is selected" or "No document is open" appears under the angle box
   when Pixelmator Pro has nothing to rotate.
-* "Select a single layer to measure" appears when Detect or Level is pressed
+* "Select a single layer to measure" appears when Select or Level is pressed
   with several layers selected.
 * "The selection changed" under Cancel means the layers selected now are not the
   ones whose starting angle was saved; select the original layer again.

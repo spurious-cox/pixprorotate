@@ -211,6 +211,46 @@ func dropSnapshot() {
     snapshot = nil
 }
 
+/// Pixelmator Pro scrolls its Layers sidebar to a layer the minimum distance, leaving it at the bottom edge. Selecting a layer
+/// a few rows further down first, then selecting the real one, leaves it nearer the middle. Only for a single selected layer.
+func revealInSidebar(rowsBelow: Int = 7) {
+    guard let id = runningPixelmatorID() else { return }
+    let src = """
+    tell application id "\(id)"
+        if (count of documents) is 0 then return
+        set d to front document
+        set sel to selected layers of d
+        if (count of sel) is not 1 then return
+        set L to item 1 of sel
+        set myID to id of L
+        set holder to d
+        try
+            set p to parent of L
+            if p is not missing value then set holder to p
+        end try
+        set sibs to layers of holder
+        set idx to 0
+        repeat with i from 1 to count of sibs
+            if (id of (item i of sibs)) is myID then
+                set idx to i
+                exit repeat
+            end if
+        end repeat
+        if idx is 0 then return
+        set j to idx + \(rowsBelow)
+        if j > (count of sibs) then set j to count of sibs
+        if j > idx then
+            select (item j of sibs)
+            delay 0.15
+            select (item idx of sibs)
+        end if
+    end tell
+    """
+    var err: NSDictionary?
+    NSAppleScript(source: src)?.executeAndReturnError(&err)
+    if let err = err { log("reveal failed: \((err[NSAppleScript.errorMessage] as? String) ?? "")") }
+}
+
 /// Called when Detect or Level starts: keep the backup if it is for the selected group, else replace it.
 func ensureSnapshot() {
     noteBaseline()
@@ -741,11 +781,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         readme.bezelStyle = .rounded
         let bottom = NSStackView(views: [readme, quit]); bottom.orientation = .horizontal; bottom.spacing = 16
         toggle.state = ArrowTap.shared.enabled ? .on : .off
-        for (b, t, a) in [(detectBtn, "Detect", #selector(detectPressed)), (levelBtn, "Level", #selector(levelPressed)),
+        for (b, t, a) in [(detectBtn, "Select", #selector(detectPressed)), (levelBtn, "Level", #selector(levelPressed)),
                           (restoreBtn, "Restore", #selector(restorePressed))] { b.title = t; b.target = self; b.action = a }
         let (detect, level, restore) = (detectBtn, levelBtn, restoreBtn)
         for b in [detect, level, restore] { b.bezelStyle = .rounded }
-        detect.toolTip = "Measure the visible angle of the selected item (its rotation setting may say 0 for a drawn diagonal)"
+        detect.toolTip = "Measure the visible angle of the selected item, and start a round (backup copy for groups)"
         level.toolTip = "Turn the item to the nearest horizontal or vertical, remembering how far it turned"
         restore.toolTip = "Turn the item back to where it was before Level"
         let cancel = cancelBtn
@@ -754,15 +794,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         cancel.toolTip = "Put the selected item back to the angle it had when you selected it"
         let undo = undoBtn
         undo.title = "Undo"; undo.target = self; undo.action = #selector(undoPressed); undo.bezelStyle = .rounded
-        undo.toolTip = "Same as Command-Z in Pixelmator Pro. Give it a moment after you press it."
+        undo.toolTip = "Undo last action. Shift-click = redo. Be patient."
         for b in [detect, level, undo, restore, cancel] { b.widthAnchor.constraint(equalToConstant: 62).isActive = true; b.font = .systemFont(ofSize: 12) }
-        let tools = NSStackView(views: [detect, level, undo, restore, cancel]); tools.orientation = .horizontal; tools.spacing = 6
+        let tools = NSStackView(views: [detect, level, undo, restore, cancel]); tools.orientation = .horizontal; tools.spacing = 8
         let stack = NSStackView(views: [label, field, presets, tools, hint, toggle, status, bottom])
         stack.orientation = .vertical; stack.alignment = .centerX; stack.spacing = 14
         stack.setCustomSpacing(20, after: presets)
         stack.setCustomSpacing(6, after: hint)
         stack.setCustomSpacing(20, after: status)
-        stack.edgeInsets = NSEdgeInsets(top: 22, left: 28, bottom: 22, right: 28)
+        stack.edgeInsets = NSEdgeInsets(top: 22, left: 44, bottom: 22, right: 44)
         stack.translatesAutoresizingMaskIntoConstraints = false
         field.widthAnchor.constraint(equalToConstant: 150).isActive = true
         let content = NSView()
@@ -927,7 +967,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             note("Select a single layer to measure")
             let a = NSAlert()
             a.messageText = "More than one layer is selected"
-            a.informativeText = "Detect and Level measure the angle of one item, so they cannot work on several layers at once. Select a single layer, or group the items first, and try again."
+            a.informativeText = "Select and Level measure the angle of one item, so they cannot work on several layers at once. Select a single layer, or group the items first, and try again."
             a.addButton(withTitle: "OK")
             a.beginSheetModal(for: panel, completionHandler: nil)
         } else { note(e ?? "Could not measure") }
@@ -944,6 +984,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         queue.async {
             ensureSnapshot()
             let (m, e) = measureSelection()
+            if m != nil { revealInSidebar() }
             DispatchQueue.main.async {
                 guard let m = m else { self.reportError(e); return }
                 if m.elongation < 1.25 { self.note("No clear direction (shape is nearly square or round)"); return }
@@ -980,13 +1021,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     @objc func undoPressed() {
         dirty = false; panel.makeFirstResponder(nil)
         guard let pid = pixelmatorApp()?.processIdentifier else { note("Pixelmator Pro is not running"); return }
+        let redo = NSEvent.modifierFlags.contains(.shift)   // Shift held while pressing = Shift-Command-Z
         for down in [true, false] {
             let e = CGEvent(keyboardEventSource: nil, virtualKey: 6, keyDown: down)   // Z
-            e?.flags = .maskCommand
+            e?.flags = redo ? [.maskCommand, .maskShift] : .maskCommand
             e?.postToPid(pid)
         }
         undoBtn.isEnabled = false
-        note("Undo sent. Please be patient, it may take a moment; don't press it again yet.")
+        note((redo ? "Redo" : "Undo") + " sent. Please be patient, it may take a moment; don't press it again yet.")
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.undoBtn.isEnabled = true; self.refreshAngle(force: true) }
     }
 
@@ -996,7 +1038,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             self.pending = 0
             var r: (angle: Double?, error: String?)
             if snapshot != nil {
-                if let e = restoreSnapshot() { r = (nil, e) } else { noteBaseline(); r = readAngle() }
+                if let e = restoreSnapshot() { r = (nil, e) } else { revealInSidebar(); noteBaseline(); r = readAngle() }
             } else { r = cancelToBaseline() }
             DispatchQueue.main.async {
                 self.cancelRed = false
