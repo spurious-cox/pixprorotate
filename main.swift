@@ -495,7 +495,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         detect.toolTip = "Measure the visible angle of the selected item (its rotation setting may say 0 for a drawn diagonal)"
         level.toolTip = "Turn the item to the nearest horizontal or vertical, remembering how far it turned"
         restore.toolTip = "Turn the item back to where it was before Level"
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelPressed))
+        let cancel = cancelBtn
+        cancel.title = "Cancel"; cancel.target = self; cancel.action = #selector(cancelPressed)
         cancel.bezelStyle = .rounded
         cancel.toolTip = "Put the selected item back to the angle it had when you selected it"
         for b in [detect, level, restore, cancel] { b.widthAnchor.constraint(equalToConstant: 72).isActive = true }
@@ -641,15 +642,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     /// Amount Level turned the item (clockwise degrees), kept so Restore can undo exactly that much.
     var levelled: Double? { didSet { colorNext() } }
-    let detectBtn = NSButton(), levelBtn = NSButton(), restoreBtn = NSButton()
+    let detectBtn = NSButton(), levelBtn = NSButton(), restoreBtn = NSButton(), cancelBtn = NSButton()
+    /// Cancel stays blue from Detect until it is pressed (or Restore finishes the round).
+    var cancelArmed = false { didSet { colorNext() } }
     var detected = false { didSet { colorNext() } }
 
     /// Colors the button to press next once Detect has been pressed: Level, then Restore, then plain again.
     func colorNext() {
         let next: NSButton? = levelled != nil ? restoreBtn : detected ? levelBtn : nil   // nothing is colored until Detect is pressed
-        for b in [detectBtn, levelBtn, restoreBtn] {
-            b.bezelColor = (b === next) ? .controlAccentColor : nil
-            b.contentTintColor = (b === next) ? .white : nil
+        for b in [detectBtn, levelBtn, restoreBtn, cancelBtn] {
+            let on = (b === next) || (b === cancelBtn && cancelArmed)
+            b.bezelColor = on ? .controlAccentColor : nil
+            b.contentTintColor = on ? .white : nil
         }
     }
 
@@ -677,7 +681,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             DispatchQueue.main.async {
                 guard let m = m else { self.reportError(e); return }
                 if m.elongation < 1.25 { self.note("No clear direction (shape is nearly square or round)"); return }
-                self.detected = true
+                self.detected = true; self.cancelArmed = true
                 self.note("Seen at \(angleText((m.axis * 10).rounded() / 10))° (\(angleText((abs(m.tilt) * 10).rounded() / 10))° off straight). Level straightens it.")
             }
         }
@@ -707,7 +711,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             self.pending = 0
             let r = cancelToBaseline()
             DispatchQueue.main.async {
-                if r.error == nil { self.levelled = nil; self.detected = false }
+                if r.error == nil { self.levelled = nil; self.detected = false; self.cancelArmed = false }
                 self.show(r)
                 self.note(r.error ?? "Cancelled: back to the angle it had when selected")
             }
@@ -721,7 +725,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             self.pending = 0
             let r = rotateSelection(by: t)
             DispatchQueue.main.async {
-                if r.error == nil { self.levelled = nil }
+                if r.error == nil { self.levelled = nil; self.cancelArmed = false }
                 self.show(r)
                 if r.error == nil { self.note("Restored to its original angle") }
             }
