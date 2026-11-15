@@ -98,7 +98,7 @@ deal with that, so you can edit an angled item straight and then put it back:
 2. **Level** turns the layer to the nearest horizontal or vertical and
    remembers how far it turned. Now it is easy to edit.
 3. **Undo** (between Level and Restore) sends Command-Z to Pixelmator Pro (hold **Shift** while pressing it for Shift-Command-Z, redo), for
-   when an edit made while the item was leveled needs to be taken back. The button is yellow whenever Pixelmator Pro has something to undo. It works
+   when an edit made while the item was leveled needs to be taken back. The button is yellow while there is something to undo that was done after you pressed **Select**, and goes plain again when Undo has taken you back to that point. Pixelmator Pro does not report how deep its history is, so this is an estimate: it compares the wording of its Undo menu item with what it said at Select, and counts the edits PixProRotate made itself. Several identical edits in a row by hand can make it go plain a step early. It works
    like the key, so it can take a moment: be patient and press it once. Undoing
    past Level itself puts the angle out of step with Restore; press **Cancel** then.
 4. **Restore** turns it back by exactly that amount; if the leveled item is no longer selected (you clicked inside the group, say) it tells you so instead of turning something else.

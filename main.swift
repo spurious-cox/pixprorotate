@@ -314,21 +314,37 @@ func noteBaseline() -> Bool {
         return d > 0.05 }
 }
 
-/// True when Pixelmator Pro's Edit > Undo item is available (read from its menu bar through Accessibility).
-func pixelmatorCanUndo() -> Bool {
-    guard AXIsProcessTrusted(), let pid = pixelmatorApp()?.processIdentifier else { return false }
+/// Pixelmator Pro's Edit > Undo menu item: whether it is available and what it says ("Undo Rotate Layer"...), read through Accessibility.
+func pixelmatorUndoState() -> (enabled: Bool, title: String) {
+    guard AXIsProcessTrusted(), let pid = pixelmatorApp()?.processIdentifier else { return (false, "") }
     func attr(_ e: AXUIElement, _ n: String) -> CFTypeRef? { var v: CFTypeRef?; return AXUIElementCopyAttributeValue(e, n as CFString, &v) == .success ? v : nil }
     let app = AXUIElementCreateApplication(pid)
-    guard let bar = attr(app, "AXMenuBar") else { return false }
+    guard let bar = attr(app, "AXMenuBar") else { return (false, "") }
     for top in (attr(bar as! AXUIElement, "AXChildren") as? [AXUIElement]) ?? [] where (attr(top, "AXTitle") as? String) == "Edit" {
         for menu in (attr(top, "AXChildren") as? [AXUIElement]) ?? [] {
             for item in (attr(menu, "AXChildren") as? [AXUIElement]) ?? [] {
                 let t = attr(item, "AXTitle") as? String ?? ""
-                if t == "Undo" || t.hasPrefix("Undo ") { return (attr(item, "AXEnabled") as? Bool) ?? false }
+                if t == "Undo" || t.hasPrefix("Undo ") { return ((attr(item, "AXEnabled") as? Bool) ?? false, t) }
             }
         }
     }
-    return false
+    return (false, "")
+}
+
+// The Undo button lights only for edits made after Select. Pixelmator Pro does not say how deep its history is, so this
+// estimates: the Undo menu's wording when Select was pressed is remembered, and the button is lit while the wording differs
+// from that, or while PixProRotate's own edits (Level, arrows, presets, Restore, Cancel) outnumber the Undos pressed here.
+var undoMark: (enabled: Bool, title: String)?   // queue only
+var ownEdits = 0                                // queue only
+var undoNet = 0                                 // Undo presses minus Redo presses since Select (queue only)
+
+func markUndoPoint() { undoMark = pixelmatorUndoState(); ownEdits = 0; undoNet = 0 }
+func resetUndoPoint() { undoMark = nil; ownEdits = 0; undoNet = 0 }
+func undoLit() -> Bool {
+    guard let m = undoMark else { return false }
+    let now = pixelmatorUndoState()
+    guard now.enabled else { return false }
+    return now.enabled != m.enabled || now.title != m.title || ownEdits - undoNet > 0
 }
 
 /// Ids of the layers selected right now (without touching the saved baseline).
@@ -391,6 +407,7 @@ func cancelToBaseline() -> (angle: Double?, error: String?) {
 
 func rotateSelection(by delta: Double, absolute: Bool = false) -> (angle: Double?, error: String?) {
     noteBaseline()
+    if undoMark != nil { ownEdits += 1 }
     guard let id = runningPixelmatorID() else { return (nil, "Pixelmator Pro is not running") }
     let src = """
     tell application id "\(id)"
@@ -944,11 +961,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             if self.draining || self.pending != 0 { return }
             let ch = noteBaseline() || groupChanged()
             let r = readAngle()
-            let canUndo = pixelmatorCanUndo()
+            let canUndo = undoLit()
             // Nothing selected (or no document): the round is over, so drop the backup copy and the saved angles.
             let none = r.error == "No layer is selected" || r.error == "No document is open"
             if none && (snapshot != nil || !baseline.isEmpty) { dropSnapshot(); baseline = [:] }
-            if none { lastRevealed = "" }
+            if none { lastRevealed = ""; resetUndoPoint() }
             else if baseline.count == 1, let k = baseline.keys.first, k != lastRevealed { lastRevealed = k; revealInSidebar() }
             DispatchQueue.main.async {
                 self.noSelection = none; self.undoAvailable = canUndo
@@ -1023,7 +1040,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         queue.async {
             ensureSnapshot()
             let (m, e) = measureSelection()
-            if m != nil { revealInSidebar() }
+            if m != nil { revealInSidebar(); markUndoPoint() }
             DispatchQueue.main.async {
                 guard let m = m else { self.reportError(e); return }
                 if m.elongation < 1.25 { self.note("No clear direction (shape is nearly square or round)"); return }
@@ -1066,6 +1083,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             e?.flags = redo ? [.maskCommand, .maskShift] : .maskCommand
             e?.postToPid(pid)
         }
+        queue.async { undoNet += redo ? -1 : 1 }
         undoBtn.isEnabled = false
         note((redo ? "Redo" : "Undo") + " sent. Please be patient, it may take a moment; don't press it again yet.")
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.undoBtn.isEnabled = true; self.refreshAngle(force: true) }
@@ -1076,6 +1094,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         queue.async {
             self.pending = 0
             var r: (angle: Double?, error: String?)
+            if undoMark != nil { ownEdits += 1 }
             if snapshot != nil {
                 if let e = restoreSnapshot() { r = (nil, e) } else { revealInSidebar(); noteBaseline(); r = readAngle() }
             } else { r = cancelToBaseline() }
