@@ -733,8 +733,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         label.setContentCompressionResistancePriority(.init(100), for: .horizontal)
         let presets = NSStackView(views: [0, 90, 180, 270].map { a -> NSButton in
             let b = NSButton(title: "\(a)°", target: self, action: #selector(presetPressed(_:)))
-            b.tag = a; b.bezelStyle = .rounded; b.widthAnchor.constraint(equalToConstant: 64).isActive = true; return b })
-        presets.orientation = .horizontal; presets.spacing = 10
+            b.tag = a; b.bezelStyle = .rounded; b.controlSize = .small; b.font = .systemFont(ofSize: 11); b.widthAnchor.constraint(equalToConstant: 46).isActive = true; return b })
+        presets.orientation = .horizontal; presets.spacing = 6
         let quit = NSButton(title: "Quit", target: NSApp, action: #selector(NSApplication.terminate(_:)))
         quit.bezelStyle = .rounded; quit.keyEquivalent = ""
         let readme = NSButton(title: "Read Me", target: self, action: #selector(openReadMe))
@@ -752,8 +752,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         cancel.title = "Cancel"; cancel.target = self; cancel.action = #selector(cancelPressed)
         cancel.bezelStyle = .rounded
         cancel.toolTip = "Put the selected item back to the angle it had when you selected it"
-        for b in [detect, level, restore, cancel] { b.widthAnchor.constraint(equalToConstant: 72).isActive = true }
-        let tools = NSStackView(views: [detect, level, restore, cancel]); tools.orientation = .horizontal; tools.spacing = 10
+        let undo = undoBtn
+        undo.title = "Undo"; undo.target = self; undo.action = #selector(undoPressed); undo.bezelStyle = .rounded
+        undo.toolTip = "Same as Command-Z in Pixelmator Pro. Give it a moment after you press it."
+        for b in [detect, level, undo, restore, cancel] { b.widthAnchor.constraint(equalToConstant: 62).isActive = true; b.font = .systemFont(ofSize: 12) }
+        let tools = NSStackView(views: [detect, level, undo, restore, cancel]); tools.orientation = .horizontal; tools.spacing = 6
         let stack = NSStackView(views: [label, field, presets, tools, hint, toggle, status, bottom])
         stack.orientation = .vertical; stack.alignment = .centerX; stack.spacing = 14
         stack.setCustomSpacing(20, after: presets)
@@ -902,7 +905,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     /// Amount Level turned the item (clockwise degrees), kept so Restore can undo exactly that much.
     var levelled: Double? { didSet { colorNext() } }
     var levelledIDs: Set<String> = []   // the layers Level turned, so Restore can tell if they are still selected
-    let detectBtn = TintButton(), levelBtn = TintButton(), restoreBtn = TintButton(), cancelBtn = TintButton()
+    let detectBtn = TintButton(), levelBtn = TintButton(), restoreBtn = TintButton(), cancelBtn = TintButton(), undoBtn = NSButton()
     /// Cancel is red whenever the selection is no longer at the angle it had when selected.
     var cancelRed = false { didSet { if cancelRed != oldValue { colorNext() } } }
     var detected = false { didSet { colorNext() } }
@@ -971,6 +974,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 if r.error == nil { self.note("Levelled by \(angleText((-m.tilt * 10).rounded() / 10))°. Edit, then press Restore.") }
             }
         }
+    }
+
+    /// Sends Command-Z to Pixelmator Pro, then asks for patience: it can take a moment to finish.
+    @objc func undoPressed() {
+        dirty = false; panel.makeFirstResponder(nil)
+        guard let pid = pixelmatorApp()?.processIdentifier else { note("Pixelmator Pro is not running"); return }
+        for down in [true, false] {
+            let e = CGEvent(keyboardEventSource: nil, virtualKey: 6, keyDown: down)   // Z
+            e?.flags = .maskCommand
+            e?.postToPid(pid)
+        }
+        undoBtn.isEnabled = false
+        note("Undo sent. Please be patient, it may take a moment; don't press it again yet.")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.undoBtn.isEnabled = true; self.refreshAngle(force: true) }
     }
 
     @objc func cancelPressed() {

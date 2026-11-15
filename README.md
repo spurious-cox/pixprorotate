@@ -87,7 +87,7 @@ because angles are kept between 0 and 360.
 ### Detect, Level and Restore
 
 Pixelmator Pro reports a drawn diagonal line (or anything imported from SVG) as
-rotation 0, because the angle is in its shape, not in a setting. Three buttons
+rotation 0, because the angle is in its shape, not in a setting. These buttons
 deal with that, so you can edit an angled item straight and then put it back:
 
 1. **Detect** measures the angle you can actually see. It copies the selected
@@ -95,7 +95,11 @@ deal with that, so you can edit an angled item straight and then put it back:
    line, with how far it is from straight. It does not change anything.
 2. **Level** turns the layer to the nearest horizontal or vertical and
    remembers how far it turned. Now it is easy to edit.
-3. **Restore** turns it back by exactly that amount; if the leveled item is no longer selected (you clicked inside the group, say) it tells you so instead of turning something else.
+3. **Undo** (between Level and Restore) sends Command-Z to Pixelmator Pro, for
+   when an edit made while the item was leveled needs to be taken back. It works
+   like the key, so it can take a moment: be patient and press it once. Undoing
+   past Level itself puts the angle out of step with Restore; press **Cancel** then.
+4. **Restore** turns it back by exactly that amount; if the leveled item is no longer selected (you clicked inside the group, say) it tells you so instead of turning something else.
 
 The button to press next is green: Detect, then Level, then Restore, then back
 to Detect. Choosing a preset (0°, 90°, 180°, 270°) turns all the colors off until
