@@ -1,4 +1,4 @@
-# PixProRotate 2.2.0
+# PixProRotate 2.3.0
 
 Rotates the selected Pixelmator Pro layers to any angle, positive or negative,
 from the keyboard or by typing a number.
@@ -83,6 +83,10 @@ The box always shows the compass angle of the selected layer, such as 47 or 80,
 and follows the selection as you change it in Pixelmator Pro. Type a number and
 press Return to set the angle exactly. Negative numbers work: -80 gives 280,
 because angles are kept between 0 and 360.
+
+### Detect, Level and Restore
+
+Pixelmator Pro reports a drawn diagonal line (or anything imported from SVG) as rotation 0, because the angle is in its shape. **Detect** measures the angle you can actually see: it copies the selection, finds the long axis of the pixels, and shows it in the message line, with how far it is from straight. **Level** turns the selection to the nearest horizontal or vertical and remembers how far it turned. **Restore** turns it back by exactly that amount. Your clipboard is put back after each measurement. Round or square shapes have no clear direction, so Level leaves them alone.
 
 ### Presets
 

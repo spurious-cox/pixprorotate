@@ -1,6 +1,6 @@
 import Cocoa
 
-let appVersion = "2.2.0"
+let appVersion = "2.3.0"
 let kBundleIDs = ["com.apple.pixelmator", "com.pixelmatorteam.pixelmator.x"]
 
 // MARK: - Talking to Pixelmator Pro
@@ -77,6 +77,81 @@ func readAngle() -> (angle: Double?, error: String?) {
     let r = NSAppleScript(source: src)?.executeAndReturnError(&err)
     if let err = err { return (nil, (err[NSAppleScript.errorMessage] as? String) ?? "AppleScript error") }
     return (r.map { toCompass($0.doubleValue) }, nil)
+}
+
+// MARK: - Measuring the visible angle of an item
+
+/// Pixelmator Pro only reports a layer's rotation setting. A line drawn (or imported from SVG) at an angle has
+/// rotation 0, so its real direction has to be measured: the selection is copied, the clipboard image is read, and the
+/// long axis of the painted pixels gives the angle. The user's clipboard is put back afterward.
+struct Measure {
+    var axis: Double        // direction of the long axis, compass degrees (0 = up, clockwise), 0..<180
+    var tilt: Double        // how far the item sits (clockwise) from the nearest horizontal/vertical, -45...45
+    var elongation: Double  // long side / short side of the pixel cloud; near 1 means no clear direction
+}
+
+func measureSelection() -> (Measure?, String?) {
+    guard let id = runningPixelmatorID() else { return (nil, "Pixelmator Pro is not running") }
+    let pb = NSPasteboard.general
+    let saved: [[(NSPasteboard.PasteboardType, Data)]] = (pb.pasteboardItems ?? []).map { it in
+        it.types.compactMap { t in it.data(forType: t).map { (t, $0) } } }
+    defer {
+        pb.clearContents()
+        let items = saved.map { pairs -> NSPasteboardItem in
+            let n = NSPasteboardItem(); for (t, d) in pairs { n.setData(d, forType: t) }; return n }
+        if !items.isEmpty { pb.writeObjects(items) }
+    }
+    let before = pb.changeCount
+    let src = """
+    tell application id "\(id)"
+        if (count of documents) is 0 then error "No document is open"
+        set n to count of (selected layers of front document)
+        if n is 0 then error "No layer is selected"
+        if n > 1 then error "MULTIPLE"
+        copy front document
+    end tell
+    """
+    var err: NSDictionary?
+    NSAppleScript(source: src)?.executeAndReturnError(&err)
+    if let err = err { return (nil, (err[NSAppleScript.errorMessage] as? String) ?? "AppleScript error") }
+    for _ in 0..<40 where pb.changeCount == before { Thread.sleep(forTimeInterval: 0.025) }
+    guard pb.changeCount != before, let data = pb.data(forType: .tiff) ?? pb.data(forType: .png),
+          let rep = NSBitmapImageRep(data: data), let px = rep.bitmapData else { return (nil, "Could not copy the layer") }
+    let w = rep.pixelsWide, h = rep.pixelsHigh, spp = rep.samplesPerPixel, bpr = rep.bytesPerRow
+    guard w > 1, h > 1, spp >= 3, rep.bitsPerSample == 8 else { return (nil, "Unsupported layer image") }
+    // Weight = opacity; with no alpha channel, difference from the corner color.
+    let hasAlpha = rep.hasAlpha && spp == 4
+    let bg = (px[0], px[1], px[2])
+    var sw = 0.0, sx = 0.0, sy = 0.0, sxx = 0.0, syy = 0.0, sxy = 0.0
+    // A stride keeps very large layers quick; the angle does not need every pixel.
+    let step = max(1, Int((Double(w) * Double(h) / 4_000_000).squareRoot()))
+    var y = 0
+    while y < h {
+        var x = 0
+        while x < w {
+            let p = px + y * bpr + x * spp
+            let wt: Double = hasAlpha ? Double(p[3]) / 255
+                : (abs(Int(p[0]) - Int(bg.0)) + abs(Int(p[1]) - Int(bg.1)) + abs(Int(p[2]) - Int(bg.2)) > 24 ? 1 : 0)
+            if wt > 0.02 {
+                let fx = Double(x), fy = Double(y)
+                sw += wt; sx += wt * fx; sy += wt * fy
+                sxx += wt * fx * fx; syy += wt * fy * fy; sxy += wt * fx * fy
+            }
+            x += step
+        }
+        y += step
+    }
+    guard sw > 0 else { return (nil, "The layer has no visible pixels") }
+    let mx = sx / sw, my = sy / sw
+    let cxx = sxx / sw - mx * mx, cyy = syy / sw - my * my, cxy = sxy / sw - mx * my
+    let tr = cxx + cyy, det = cxx * cyy - cxy * cxy
+    let disc = max(0, tr * tr / 4 - det).squareRoot()
+    let l1 = tr / 2 + disc, l2 = max(1e-9, tr / 2 - disc)
+    // Principal axis in image coordinates (y points down, so this angle runs clockwise from east).
+    let phi = 0.5 * atan2(2 * cxy, cxx - cyy) * 180 / .pi
+    var axis = (phi + 90).truncatingRemainder(dividingBy: 180); if axis < 0 { axis += 180 }
+    var tilt = axis.truncatingRemainder(dividingBy: 90); if tilt > 45 { tilt -= 90 }
+    return (Measure(axis: axis, tilt: tilt, elongation: (l1 / l2).squareRoot()), nil)
 }
 
 func angleText(_ a: Double) -> String {
@@ -342,7 +417,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         readme.bezelStyle = .rounded
         let bottom = NSStackView(views: [readme, quit]); bottom.orientation = .horizontal; bottom.spacing = 16
         toggle.state = ArrowTap.shared.enabled ? .on : .off
-        let stack = NSStackView(views: [label, field, presets, hint, toggle, status, bottom])
+        for (b, t, a) in [(detectBtn, "Detect", #selector(detectPressed)), (levelBtn, "Level", #selector(levelPressed)),
+                          (restoreBtn, "Restore", #selector(restorePressed))] { b.title = t; b.target = self; b.action = a }
+        let (detect, level, restore) = (detectBtn, levelBtn, restoreBtn)
+        for b in [detect, level, restore] { b.bezelStyle = .rounded; b.widthAnchor.constraint(equalToConstant: 84).isActive = true }
+        detect.toolTip = "Measure the visible angle of the selected item (its rotation setting may say 0 for a drawn diagonal)"
+        level.toolTip = "Turn the item to the nearest horizontal or vertical, remembering how far it turned"
+        restore.toolTip = "Turn the item back to where it was before Level"
+        let tools = NSStackView(views: [detect, level, restore]); tools.orientation = .horizontal; tools.spacing = 10
+        let stack = NSStackView(views: [label, field, presets, tools, hint, toggle, status, bottom])
         stack.orientation = .vertical; stack.alignment = .centerX; stack.spacing = 14
         stack.setCustomSpacing(20, after: presets)
         stack.setCustomSpacing(6, after: hint)
@@ -382,6 +465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         NSApp.activate(ignoringOtherApps: true)
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.refreshAngle() }
         refreshAngle(force: true)
+        colorNext()
         if ArrowTap.shared.enabled { startArrowTap() }
         p.makeFirstResponder(nil)   // arrows work immediately; click the field to type
     }
@@ -443,6 +527,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     /// Shows the current angle in the text window (unless the user is typing in it) or the error below it.
     func show(_ r: (angle: Double?, error: String?), force: Bool = false) {
         if let e = r.error { status.stringValue = e; status.toolTip = e; if !dirty { field.stringValue = "0" }; return }
+        if let a = r.angle, force || !dirty { field.stringValue = angleText(a) }
+        if Date() < noteUntil { return }
         status.toolTip = nil
         status.stringValue = (ArrowTap.shared.enabled && !ArrowTap.shared.active)
             ? "Arrows over Pixelmator need Accessibility access (see Read Me)" : "Compass angle: 0 at top, clockwise (0–360)"
@@ -475,6 +561,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     @objc func openReadMe() {
         if let u = Bundle.main.url(forResource: "PixProRotate-README", withExtension: "txt") { NSWorkspace.shared.open(u) }
+    }
+
+    /// Amount Level turned the item (clockwise degrees), kept so Restore can undo exactly that much.
+    var levelled: Double? { didSet { colorNext() } }
+    let detectBtn = NSButton(), levelBtn = NSButton(), restoreBtn = NSButton()
+    var detected = false { didSet { colorNext() } }
+
+    /// Colors the button to press next once Detect has been pressed: Level, then Restore, then plain again.
+    func colorNext() {
+        let next: NSButton? = levelled != nil ? restoreBtn : detected ? levelBtn : nil   // nothing is colored until Detect is pressed
+        for b in [detectBtn, levelBtn, restoreBtn] {
+            b.bezelColor = (b === next) ? .controlAccentColor : nil
+            b.contentTintColor = (b === next) ? .white : nil
+        }
+    }
+
+    /// Detect and Level measure one item. With several layers selected the measurement is meaningless, so say so.
+    func reportError(_ e: String?) {
+        if e == "MULTIPLE" || (e ?? "").contains("MULTIPLE") {
+            note("Select a single layer to measure")
+            let a = NSAlert()
+            a.messageText = "More than one layer is selected"
+            a.informativeText = "Detect and Level measure the angle of one item, so they cannot work on several layers at once. Select a single layer, or group the items first, and try again."
+            a.addButton(withTitle: "OK")
+            a.beginSheetModal(for: panel, completionHandler: nil)
+        } else { note(e ?? "Could not measure") }
+    }
+
+    var noteUntil = Date.distantPast
+    /// A message from Detect/Level/Restore stays up for a few seconds before the usual status returns.
+    func note(_ s: String) { status.stringValue = s; status.toolTip = s; noteUntil = Date().addingTimeInterval(8) }
+
+    @objc func detectPressed() {
+        dirty = false; panel.makeFirstResponder(nil)
+        note("Measuring…")
+        queue.async {
+            let (m, e) = measureSelection()
+            DispatchQueue.main.async {
+                guard let m = m else { self.reportError(e); return }
+                if m.elongation < 1.25 { self.note("No clear direction (shape is nearly square or round)"); return }
+                self.detected = true
+                self.note("Seen at \(angleText((m.axis * 10).rounded() / 10))° (\(angleText((abs(m.tilt) * 10).rounded() / 10))° off straight). Level straightens it.")
+            }
+        }
+    }
+
+    @objc func levelPressed() {
+        dirty = false; panel.makeFirstResponder(nil)
+        queue.async {
+            self.pending = 0
+            let (m, e) = measureSelection()
+            guard let m = m, m.elongation >= 1.25 else {
+                DispatchQueue.main.async { if m == nil { self.reportError(e) } else { self.note("No clear direction to level") } }
+                return
+            }
+            let r = rotateSelection(by: -m.tilt)
+            DispatchQueue.main.async {
+                if r.error == nil { self.levelled = (self.levelled ?? 0) + m.tilt; self.detected = false }
+                self.show(r)
+                if r.error == nil { self.note("Levelled by \(angleText((-m.tilt * 10).rounded() / 10))°. Edit, then press Restore.") }
+            }
+        }
+    }
+
+    @objc func restorePressed() {
+        dirty = false; panel.makeFirstResponder(nil)
+        guard let t = levelled else { note("Nothing to restore (Level first)"); return }
+        queue.async {
+            self.pending = 0
+            let r = rotateSelection(by: t)
+            DispatchQueue.main.async {
+                if r.error == nil { self.levelled = nil }
+                self.show(r)
+                if r.error == nil { self.note("Restored to its original angle") }
+            }
+        }
     }
 
     @objc func presetPressed(_ b: NSButton) { dirty = false; panel.makeFirstResponder(nil); setAngle(Double(b.tag)) }
