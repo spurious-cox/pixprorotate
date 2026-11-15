@@ -20,7 +20,78 @@ func runningPixelmatorID() -> String? {
 /// number shown is 360 minus Pixelmator's, and every change is negated on the way in.
 func toCompass(_ pm: Double) -> Double { let a = (360 - pm).truncatingRemainder(dividingBy: 360); return a < 0 ? a + 360 : a }
 
+/// The angles the selected layers had when they were first selected, so Cancel can put them back.
+/// Touched only on the AppleScript queue.
+var baseline: [String: Double] = [:]
+
+/// Records the selection's current angles as the baseline when the selection is new (different layers than before).
+func noteBaseline() {
+    guard let id = runningPixelmatorID() else { return }
+    let src = """
+    tell application id "\(id)"
+        if (count of documents) is 0 then return ""
+        tell front document
+            set out to ""
+            set sel to selected layers
+            repeat with i from 1 to count of sel
+                set l to item i of sel
+                set out to out & (id of l) & "|" & (rotation of l as text) & ";"
+            end repeat
+            return out
+        end tell
+    end tell
+    """
+    var err: NSDictionary?
+    guard let r = NSAppleScript(source: src)?.executeAndReturnError(&err), err == nil, let t = r.stringValue, !t.isEmpty else { return }
+    var now: [String: Double] = [:]
+    for part in t.split(separator: ";") {
+        let kv = part.components(separatedBy: "|")
+        if kv.count == 2, let v = Double(kv[1]) { now[kv[0]] = v }
+    }
+    if Set(now.keys) != Set(baseline.keys) { baseline = now; log("baseline \(now.count) layer(s)") }
+}
+
+/// Puts every selected layer back to the angle it had when first selected.
+func cancelToBaseline() -> (angle: Double?, error: String?) {
+    guard let id = runningPixelmatorID() else { return (nil, "Pixelmator Pro is not running") }
+    if baseline.isEmpty { return (nil, "Nothing to cancel") }
+    let ids = baseline.keys.map { "\"\($0)\"" }.joined(separator: ",")
+    let rots = baseline.keys.map { String(baseline[$0]!) }.joined(separator: ",")
+    let src = """
+    tell application id "\(id)"
+        if (count of documents) is 0 then error "No document is open"
+        tell front document
+            set sel to selected layers
+            if (count of sel) is 0 then error "No layer is selected"
+            set ids to {\(ids)}
+            set rots to {\(rots)}
+            set firstAngle to missing value
+            set hits to 0
+            repeat with j from 1 to count of sel
+                set l to item j of sel
+                set i to id of l
+                repeat with k from 1 to count of ids
+                    if (item k of ids) is i then
+                        set rotation of l to (item k of rots)
+                        set hits to hits + 1
+                        if firstAngle is missing value then set firstAngle to rotation of l
+                    end if
+                end repeat
+            end repeat
+            if hits is 0 then error "The selection changed; select the original layer again to cancel"
+            return firstAngle
+        end tell
+    end tell
+    """
+    var err: NSDictionary?
+    let r = NSAppleScript(source: src)?.executeAndReturnError(&err)
+    if let err = err { return (nil, (err[NSAppleScript.errorMessage] as? String) ?? "AppleScript error") }
+    log("cancel -> baseline \(baseline.count) layer(s)")
+    return (r.map { toCompass($0.doubleValue) }, nil)
+}
+
 func rotateSelection(by delta: Double, absolute: Bool = false) -> (angle: Double?, error: String?) {
+    noteBaseline()
     guard let id = runningPixelmatorID() else { return (nil, "Pixelmator Pro is not running") }
     let src = """
     tell application id "\(id)"
@@ -420,11 +491,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         for (b, t, a) in [(detectBtn, "Detect", #selector(detectPressed)), (levelBtn, "Level", #selector(levelPressed)),
                           (restoreBtn, "Restore", #selector(restorePressed))] { b.title = t; b.target = self; b.action = a }
         let (detect, level, restore) = (detectBtn, levelBtn, restoreBtn)
-        for b in [detect, level, restore] { b.bezelStyle = .rounded; b.widthAnchor.constraint(equalToConstant: 84).isActive = true }
+        for b in [detect, level, restore] { b.bezelStyle = .rounded }
         detect.toolTip = "Measure the visible angle of the selected item (its rotation setting may say 0 for a drawn diagonal)"
         level.toolTip = "Turn the item to the nearest horizontal or vertical, remembering how far it turned"
         restore.toolTip = "Turn the item back to where it was before Level"
-        let tools = NSStackView(views: [detect, level, restore]); tools.orientation = .horizontal; tools.spacing = 10
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelPressed))
+        cancel.bezelStyle = .rounded
+        cancel.toolTip = "Put the selected item back to the angle it had when you selected it"
+        for b in [detect, level, restore, cancel] { b.widthAnchor.constraint(equalToConstant: 72).isActive = true }
+        let tools = NSStackView(views: [detect, level, restore, cancel]); tools.orientation = .horizontal; tools.spacing = 10
         let stack = NSStackView(views: [label, field, presets, tools, hint, toggle, status, bottom])
         stack.orientation = .vertical; stack.alignment = .centerX; stack.spacing = 14
         stack.setCustomSpacing(20, after: presets)
@@ -539,6 +614,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     func refreshAngle(force: Bool = false) {
         queue.async {
             if self.draining || self.pending != 0 { return }
+            noteBaseline()
             let r = readAngle()
             DispatchQueue.main.async { self.show(r, force: force) }
         }
@@ -621,6 +697,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 if r.error == nil { self.levelled = (self.levelled ?? 0) + m.tilt; self.detected = false }
                 self.show(r)
                 if r.error == nil { self.note("Levelled by \(angleText((-m.tilt * 10).rounded() / 10))°. Edit, then press Restore.") }
+            }
+        }
+    }
+
+    @objc func cancelPressed() {
+        dirty = false; panel.makeFirstResponder(nil)
+        queue.async {
+            self.pending = 0
+            let r = cancelToBaseline()
+            DispatchQueue.main.async {
+                if r.error == nil { self.levelled = nil; self.detected = false }
+                self.show(r)
+                self.note(r.error ?? "Cancelled: back to the angle it had when selected")
             }
         }
     }

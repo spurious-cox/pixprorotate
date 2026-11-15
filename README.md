@@ -100,6 +100,11 @@ deal with that, so you can edit an angled item straight and then put it back:
 The button to press next is colored: nothing is colored until you press
 Detect, then Level is, then Restore, and after Restore the colors clear.
 
+**Cancel** is the way out when changes get out of hand: it puts the selected
+layer back to the angle it had when you selected it, whatever you did since
+(arrow keys, typed angles, presets, Level, Restore), and clears the colors. If
+you select a different layer, that layer's angle becomes the new starting point.
+
 Detect and Level work on **one layer at a time**. A group counts as one layer,
 so a line made of a shaft and an arrowhead is fine. If several layers are
 selected, a dialog says so; select a single layer, or group the items first.
@@ -129,6 +134,8 @@ Allow it; that is how it reads and sets layer angles.
   when Pixelmator Pro has nothing to rotate.
 * "Select a single layer to measure" appears when Detect or Level is pressed
   with several layers selected.
+* "The selection changed" under Cancel means the layers selected now are not the
+  ones whose starting angle was saved; select the original layer again.
 * "No clear direction" means the shape is nearly square or round, so it has no
   long axis to level.
 * If the arrow keys still nudge the object, PixProRotate has no Accessibility access yet, or the
