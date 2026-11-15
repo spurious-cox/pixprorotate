@@ -211,6 +211,8 @@ func dropSnapshot() {
     snapshot = nil
 }
 
+var lastRevealed = ""   // id of the layer the sidebar was last scrolled to (queue only)
+
 /// Pixelmator Pro scrolls its Layers sidebar to a layer the minimum distance, leaving it at the bottom edge. Selecting a layer
 /// a few rows further down first, then selecting the real one, leaves it nearer the middle. Only for a single selected layer.
 func revealInSidebar(rowsBelow: Int = 7) {
@@ -227,6 +229,13 @@ func revealInSidebar(rowsBelow: Int = 7) {
         try
             set p to parent of L
             if p is not missing value then set holder to p
+        end try
+        -- A group is opened by selecting its first item (Pixelmator unfolds the group to show it), then selecting the group again.
+        try
+            if (class of L as string) is "group layer" and (count of layers of L) > 0 then
+                select (layer 1 of L)
+                delay 0.15
+            end if
         end try
         set sibs to layers of holder
         set idx to 0
@@ -709,6 +718,8 @@ final class RotatePanel: NSPanel {
 }
 
 let launchTime = Date()
+/// Starting width of the panel on a first launch (points): the width Tim settled on.
+let defaultPanelWidth: CGFloat = 423
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var panel: RotatePanel!
@@ -802,7 +813,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         stack.setCustomSpacing(20, after: presets)
         stack.setCustomSpacing(6, after: hint)
         stack.setCustomSpacing(20, after: status)
-        stack.edgeInsets = NSEdgeInsets(top: 22, left: 44, bottom: 22, right: 44)
+        stack.edgeInsets = NSEdgeInsets(top: 22, left: 40, bottom: 22, right: 40)
         stack.translatesAutoresizingMaskIntoConstraints = false
         field.widthAnchor.constraint(equalToConstant: 150).isActive = true
         let content = NSView()
@@ -814,7 +825,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor)])
         p.contentView = content
         content.layoutSubtreeIfNeeded()
-        p.setContentSize(stack.fittingSize)
+        var startSize = stack.fittingSize
+        // First launch (no remembered size): start at the default width. After that the remembered size wins.
+        if UserDefaults.standard.string(forKey: "NSWindow Frame PixProRotatePanel") == nil { startSize.width = max(startSize.width, defaultPanelWidth) }
+        p.setContentSize(startSize)
         p.contentMinSize = stack.fittingSize          // as small as the layout needs, or any larger size
         p.setFrameAutosaveName("PixProRotatePanel")   // remembers the size you choose
         // Tiny app icon beside the title, centered in the title bar (only once AppIcon.icns is in the bundle).
@@ -916,7 +930,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             // Nothing selected (or no document): the round is over, so drop the backup copy and the saved angles.
             let none = r.error == "No layer is selected" || r.error == "No document is open"
             if none && (snapshot != nil || !baseline.isEmpty) { dropSnapshot(); baseline = [:] }
+            if none { lastRevealed = "" }
+            else if baseline.count == 1, let k = baseline.keys.first, k != lastRevealed { lastRevealed = k; revealInSidebar() }
             DispatchQueue.main.async {
+                self.noSelection = none
                 if none { self.levelled = nil; self.detected = false; self.cancelRed = false } else { self.cancelRed = ch }
                 self.show(r, force: force)
             }
@@ -951,12 +968,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var detected = false { didSet { colorNext() } }
     /// A preset (0, 90, 180, 270) was chosen on purpose, so the guide colors stay off until the next Detect.
     var colorsOff = false { didSet { colorNext() } }
+    /// Nothing is selected in Pixelmator Pro: every button light is off until something is.
+    var noSelection = false { didSet { if noSelection != oldValue { colorNext() } } }
 
     /// Green marks the button to press next: Detect, then Level, then Restore, then Detect again. Cancel is red once something changed.
     func colorNext() {
         let next: NSButton = levelled != nil ? restoreBtn : detected ? levelBtn : detectBtn
         for b in [detectBtn, levelBtn, restoreBtn, cancelBtn] {
-            let color: NSColor? = colorsOff ? nil : b === cancelBtn ? (cancelRed ? .systemRed : nil) : (b === next ? .systemGreen : nil)
+            let color: NSColor? = (colorsOff || noSelection) ? nil : b === cancelBtn ? (cancelRed ? .systemRed : nil) : (b === next ? .systemGreen : nil)
             b.tint = color
         }
     }

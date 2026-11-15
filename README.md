@@ -144,6 +144,19 @@ angles. The box shows the first selected layer's angle. The presets and typed
 angles set every selected layer to the same angle. Select and Level are the
 exception: they need a single layer (see above).
 
+## Layers sidebar
+
+Whenever you select a single layer in Pixelmator Pro, PixProRotate scrolls the Layers
+sidebar so it sits nearer the middle, and opens it if it is a group, so you can see
+what is inside while you edit. It does this by briefly selecting a layer a few rows
+below and then yours again, so the selection may blink once. When nothing is
+selected, all the button lights go out.
+
+## Window size
+
+The panel starts 423 points wide the first time. After that it remembers the size you
+drag it to.
+
 ## Permission
 
 The first time, macOS asks whether PixProRotate may control Pixelmator Pro.
