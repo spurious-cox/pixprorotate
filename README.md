@@ -107,6 +107,17 @@ the layer is no longer at that starting angle, and goes plain again once it is.
 If you select a different layer, that layer's angle becomes the new starting
 point.
 
+**Groups are backed up.** Editing inside a group (a line turned into a curve,
+items moved) changes more than its angle. So when you press Detect or Level on a
+group, PixProRotate first makes a hidden copy of it right beside it, named
+"PixProRotate backup". Cancel swaps the original back for that copy, whatever you
+changed inside. Cancel also goes red when the group's size, position, rotation or
+direct contents no longer match the copy. The copy is deleted when you start on a
+different group or quit PixProRotate; if you save the document in between, the
+hidden copy is saved with it, so delete it by hand if you do not want it. Edits
+that change nothing the copy can compare (for example a path reshaped inside the
+same outline) do not turn Cancel red, but Cancel still restores them.
+
 Detect and Level work on **one layer at a time**. A group counts as one layer,
 so a line made of a shaft and an arrowhead is fine. If several layers are
 selected, a dialog says so; select a single layer, or group the items first.

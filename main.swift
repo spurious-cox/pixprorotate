@@ -20,6 +20,215 @@ func runningPixelmatorID() -> String? {
 /// number shown is 360 minus Pixelmator's, and every change is negated on the way in.
 func toCompass(_ pm: Double) -> Double { let a = (360 - pm).truncatingRemainder(dividingBy: 360); return a < 0 ? a + 360 : a }
 
+// MARK: - Backup copy of a selected group, for Cancel
+
+/// A grouped layer can be changed in ways its rotation does not show (a line turned into a curve, items moved),
+/// so Cancel works from a copy: a hidden duplicate kept right beside the original, named "PixProRotate backup".
+struct Snapshot { var doc: String; var orig: String; var backup: String; var name: String; var chain: [String] }
+var snapshot: Snapshot?   // touched only on the AppleScript queue
+let backupName = "PixProRotate backup"
+
+/// AppleScript that walks from the document down `chain` (ancestor layer ids) and leaves `cont` at the layer holding the siblings.
+func containerScript(_ chain: [String]) -> String {
+    let ids = chain.map { "\"\($0)\"" }.joined(separator: ",")
+    return """
+    set cont to d
+    set chain to {\(ids)}
+    repeat with ci from 1 to count of chain
+        set want to item ci of chain
+        set nxt to missing value
+        set kids to layers of cont
+        repeat with ki from 1 to count of kids
+            if (id of (item ki of kids)) is want then
+                set nxt to item ki of kids
+                exit repeat
+            end if
+        end repeat
+        if nxt is missing value then error "The layer's folder could not be found"
+        set cont to nxt
+    end repeat
+    """
+}
+
+/// Makes the backup copy of the single selected group (nothing for ordinary layers). Returns an error text or nil.
+@discardableResult
+func makeSnapshot() -> String? {
+    guard let id = runningPixelmatorID() else { return "Pixelmator Pro is not running" }
+    let src = """
+    tell application id "\(id)"
+        if (count of documents) is 0 then error "No document is open"
+        set d to front document
+        set sel to selected layers of d
+        if (count of sel) is not 1 then error "NOTONE"
+        set L to item 1 of sel
+        if (class of L as string) is not "group layer" then return "PLAIN"
+        set origID to id of L
+        set origName to name of L
+        set chain to {}
+        set cur to L
+        repeat
+            try
+                set p to parent of cur
+            on error
+                exit repeat
+            end try
+            if p is missing value then exit repeat
+            if (class of p as string) is not "group layer" then exit repeat
+            set chain to {id of p} & chain
+            set cur to p
+        end repeat
+        duplicate L
+        set sibs to layers of (parent of L)
+        set bk to missing value
+        repeat with i from 1 to count of sibs
+            set x to item i of sibs
+            if (name of x) is origName and (id of x) is not origID then set bk to x
+        end repeat
+        if bk is missing value then error "Could not make the backup copy"
+        set visible of bk to false
+        set name of bk to "\(backupName)"
+        select L
+        set out to (id of d) & "|" & origID & "|" & (id of bk) & "|" & origName & "|"
+        repeat with c in chain
+            set out to out & (c as text) & ","
+        end repeat
+        return out
+    end tell
+    """
+    var err: NSDictionary?
+    let r = NSAppleScript(source: src)?.executeAndReturnError(&err)
+    if let err = err {
+        let m = (err[NSAppleScript.errorMessage] as? String) ?? "AppleScript error"
+        return m.contains("NOTONE") ? nil : m
+    }
+    guard let t = r?.stringValue, t != "PLAIN" else { return nil }
+    let p = t.components(separatedBy: "|")
+    guard p.count >= 5 else { return nil }
+    snapshot = Snapshot(doc: p[0], orig: p[1], backup: p[2], name: p[3], chain: p[4].split(separator: ",").map(String.init))
+    log("backup made for \(p[3])")
+    return nil
+}
+
+/// Compares the group with its backup copy (size, position, rotation, direct children). nil when there is no backup.
+func snapshotDiffers() -> Bool? {
+    guard let id = runningPixelmatorID(), let s = snapshot else { return nil }
+    func fp(_ v: String, _ out: String) -> String { """
+        set \(out) to (class of \(v) as string) & ":" & (rotation of \(v) as string) & ":" & (width of \(v) as string) & ":" & (height of \(v) as string) & ":" & (position of \(v) as string)
+        try
+            set kids to layers of \(v)
+            set n to count of kids
+            set \(out) to \(out) & ":n" & n
+            if n <= 40 then
+                repeat with i from 1 to n
+                    set k to item i of kids
+                    set \(out) to \(out) & "[" & (class of k as string) & (width of k as string) & "," & (height of k as string) & (position of k as string) & (rotation of k as string) & "]"
+                end repeat
+            end if
+        end try
+        """ }
+    let src = """
+    tell application id "\(id)"
+        set d to document id "\(s.doc)"
+        \(containerScript(s.chain))
+        set sibs to layers of cont
+        set a to missing value
+        set b to missing value
+        repeat with i from 1 to count of sibs
+            set x to item i of sibs
+            if (id of x) is "\(s.orig)" then set a to x
+            if (id of x) is "\(s.backup)" then set b to x
+        end repeat
+        if b is missing value then error "BACKUPGONE"
+        if a is missing value then return "yes"
+        \(fp("a", "fa"))
+        \(fp("b", "fb"))
+        if fa is fb then return "no"
+        return "yes"
+    end tell
+    """
+    var err: NSDictionary?
+    let r = NSAppleScript(source: src)?.executeAndReturnError(&err)
+    if let err = err {
+        let m = (err[NSAppleScript.errorMessage] as? String) ?? ""
+        log("backup compare failed: \(m)")
+        if m.contains("BACKUPGONE") { snapshot = nil }
+        return nil
+    }
+    return r?.stringValue == "yes"
+}
+
+/// Replaces the edited group with its backup copy. Returns an error text or nil.
+func restoreSnapshot() -> String? {
+    guard let id = runningPixelmatorID(), let s = snapshot else { return "No backup copy" }
+    let src = """
+    tell application id "\(id)"
+        set d to document id "\(s.doc)"
+        \(containerScript(s.chain))
+        set sibs to layers of cont
+        set b to missing value
+        repeat with i from 1 to count of sibs
+            if (id of (item i of sibs)) is "\(s.backup)" then set b to item i of sibs
+        end repeat
+        if b is missing value then error "The backup copy is gone"
+        repeat with i from 1 to count of sibs
+            if (id of (item i of sibs)) is "\(s.orig)" then
+                delete (item i of sibs)
+                exit repeat
+            end if
+        end repeat
+        set visible of b to true
+        set name of b to "\(s.name.replacingOccurrences(of: "\"", with: "\\\""))"
+        select b
+    end tell
+    """
+    var err: NSDictionary?
+    NSAppleScript(source: src)?.executeAndReturnError(&err)
+    if let err = err { return (err[NSAppleScript.errorMessage] as? String) ?? "AppleScript error" }
+    snapshot = nil; baseline = [:]
+    log("restored \(s.name) from backup")
+    return nil
+}
+
+/// Deletes the backup copy (a different layer was chosen, or the app is closing).
+func dropSnapshot() {
+    guard let id = runningPixelmatorID(), let s = snapshot else { snapshot = nil; return }
+    let src = """
+    tell application id "\(id)"
+        set d to document id "\(s.doc)"
+        \(containerScript(s.chain))
+        set sibs to layers of cont
+        repeat with i from 1 to count of sibs
+            if (id of (item i of sibs)) is "\(s.backup)" and (name of (item i of sibs)) is "\(backupName)" then
+                delete (item i of sibs)
+                exit repeat
+            end if
+        end repeat
+    end tell
+    """
+    var err: NSDictionary?
+    NSAppleScript(source: src)?.executeAndReturnError(&err)
+    log("backup dropped for \(s.name)")
+    snapshot = nil
+}
+
+/// Called when Detect or Level starts: keep the backup if it is for the selected group, else replace it.
+func ensureSnapshot() {
+    noteBaseline()
+    if let sn = snapshot, Set(baseline.keys) == [sn.orig] { return }
+    if snapshot != nil { dropSnapshot() }
+    if let e = makeSnapshot() { log("backup failed: \(e)") }
+}
+
+/// Red-light test used by the poll: rotation changed, or the group differs from its backup (checked every few polls).
+var pollCount = 0
+var lastGroupDiff = false
+func groupChanged() -> Bool {
+    guard let sn = snapshot, Set(baseline.keys) == [sn.orig] else { lastGroupDiff = false; return false }
+    pollCount += 1
+    if pollCount % 4 == 1 { lastGroupDiff = snapshotDiffers() ?? false }
+    return lastGroupDiff
+}
+
 /// The angles the selected layers had when they were first selected, so Cancel can put them back.
 /// Touched only on the AppleScript queue.
 var baseline: [String: Double] = [:]
@@ -620,7 +829,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     func refreshAngle(force: Bool = false) {
         queue.async {
             if self.draining || self.pending != 0 { return }
-            let ch = noteBaseline()
+            let ch = noteBaseline() || groupChanged()
             let r = readAngle()
             DispatchQueue.main.async { self.cancelRed = ch; self.show(r, force: force) }
         }
@@ -683,6 +892,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         dirty = false; panel.makeFirstResponder(nil)
         note("Measuring…")
         queue.async {
+            ensureSnapshot()
             let (m, e) = measureSelection()
             DispatchQueue.main.async {
                 guard let m = m else { self.reportError(e); return }
@@ -697,13 +907,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         dirty = false; panel.makeFirstResponder(nil)
         queue.async {
             self.pending = 0
+            ensureSnapshot()
             let (m, e) = measureSelection()
             guard let m = m, m.elongation >= 1.25 else {
                 DispatchQueue.main.async { if m == nil { self.reportError(e) } else { self.note("No clear direction to level") } }
                 return
             }
             let r = rotateSelection(by: -m.tilt)
-            let ch = noteBaseline()
+            let ch = noteBaseline() || groupChanged()
             DispatchQueue.main.async {
                 self.cancelRed = ch
                 if r.error == nil { self.levelled = (self.levelled ?? 0) + m.tilt; self.detected = false }
@@ -717,7 +928,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         dirty = false; panel.makeFirstResponder(nil)
         queue.async {
             self.pending = 0
-            let r = cancelToBaseline()
+            var r: (angle: Double?, error: String?)
+            if snapshot != nil {
+                if let e = restoreSnapshot() { r = (nil, e) } else { noteBaseline(); r = readAngle() }
+            } else { r = cancelToBaseline() }
             DispatchQueue.main.async {
                 self.cancelRed = false
                 if r.error == nil { self.levelled = nil; self.detected = false }
@@ -733,7 +947,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         queue.async {
             self.pending = 0
             let r = rotateSelection(by: t)
-            let ch = noteBaseline()
+            let ch = noteBaseline() || groupChanged()
             DispatchQueue.main.async {
                 self.cancelRed = ch
                 if r.error == nil { self.levelled = nil }
@@ -750,7 +964,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         queue.async {
             self.pending = 0
             let r = rotateSelection(by: a, absolute: true)
-            let ch = noteBaseline()
+            let ch = noteBaseline() || groupChanged()
             DispatchQueue.main.async {
                 self.cancelRed = ch
                 self.show(r)
@@ -767,7 +981,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             while self.pending != 0 {
                 let d = self.pending; self.pending = 0
                 let r = rotateSelection(by: d)
-                let ch = noteBaseline()
+                let ch = noteBaseline() || groupChanged()
                 DispatchQueue.main.async {
                     self.cancelRed = ch
                     self.show(r)
@@ -777,7 +991,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
     }
 
-    func applicationWillTerminate(_ n: Notification) { log("terminating") }
+    func applicationWillTerminate(_ n: Notification) { queue.sync { dropSnapshot() }; log("terminating") }
     func applicationShouldTerminate(_ a: NSApplication) -> NSApplication.TerminateReply {
         log("shouldTerminate: " + Thread.callStackSymbols.prefix(8).joined(separator: " | ")
             + " event=\(String(describing: NSApp.currentEvent)) windows=\(NSApp.windows.map { $0.isVisible })")
