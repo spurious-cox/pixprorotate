@@ -25,8 +25,9 @@ func toCompass(_ pm: Double) -> Double { let a = (360 - pm).truncatingRemainder(
 var baseline: [String: Double] = [:]
 
 /// Records the selection's current angles as the baseline when the selection is new (different layers than before).
-func noteBaseline() {
-    guard let id = runningPixelmatorID() else { return }
+@discardableResult
+func noteBaseline() -> Bool {
+    guard let id = runningPixelmatorID() else { return false }
     let src = """
     tell application id "\(id)"
         if (count of documents) is 0 then return ""
@@ -42,13 +43,17 @@ func noteBaseline() {
     end tell
     """
     var err: NSDictionary?
-    guard let r = NSAppleScript(source: src)?.executeAndReturnError(&err), err == nil, let t = r.stringValue, !t.isEmpty else { return }
+    guard let r = NSAppleScript(source: src)?.executeAndReturnError(&err), err == nil, let t = r.stringValue, !t.isEmpty else { return false }
     var now: [String: Double] = [:]
     for part in t.split(separator: ";") {
         let kv = part.components(separatedBy: "|")
         if kv.count == 2, let v = Double(kv[1]) { now[kv[0]] = v }
     }
     if Set(now.keys) != Set(baseline.keys) { baseline = now; log("baseline \(now.count) layer(s)") }
+    // True when any selected layer is no longer at the angle it had when first selected.
+    return now.contains { k, v in
+        var d = abs(v - (baseline[k] ?? v)).truncatingRemainder(dividingBy: 360); if d > 180 { d = 360 - d }
+        return d > 0.05 }
 }
 
 /// Puts every selected layer back to the angle it had when first selected.
@@ -615,9 +620,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     func refreshAngle(force: Bool = false) {
         queue.async {
             if self.draining || self.pending != 0 { return }
-            noteBaseline()
+            let ch = noteBaseline()
             let r = readAngle()
-            DispatchQueue.main.async { self.show(r, force: force) }
+            DispatchQueue.main.async { self.cancelRed = ch; self.show(r, force: force) }
         }
     }
 
@@ -643,16 +648,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     /// Amount Level turned the item (clockwise degrees), kept so Restore can undo exactly that much.
     var levelled: Double? { didSet { colorNext() } }
     let detectBtn = NSButton(), levelBtn = NSButton(), restoreBtn = NSButton(), cancelBtn = NSButton()
-    /// Cancel stays blue from Detect until it is pressed (or Restore finishes the round).
-    var cancelArmed = false { didSet { colorNext() } }
+    /// Cancel is red whenever the selection is no longer at the angle it had when selected.
+    var cancelRed = false { didSet { if cancelRed != oldValue { colorNext() } } }
     var detected = false { didSet { colorNext() } }
 
-    /// Colors the button to press next once Detect has been pressed: Level, then Restore, then plain again.
+    /// Green marks the button to press next: Detect, then Level, then Restore, then Detect again. Cancel is red once something changed.
     func colorNext() {
-        let next: NSButton? = levelled != nil ? restoreBtn : detected ? levelBtn : nil   // nothing is colored until Detect is pressed
+        let next: NSButton = levelled != nil ? restoreBtn : detected ? levelBtn : detectBtn
         for b in [detectBtn, levelBtn, restoreBtn, cancelBtn] {
-            let on = (b === next) || (b === cancelBtn && cancelArmed)
-            b.bezelColor = on ? .controlAccentColor : nil
+            let color: NSColor? = b === cancelBtn ? (cancelRed ? .systemRed : nil) : (b === next ? .systemGreen : nil)
+            let on = color != nil
+            b.bezelColor = color
             b.contentTintColor = on ? .white : nil
         }
     }
@@ -681,7 +687,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             DispatchQueue.main.async {
                 guard let m = m else { self.reportError(e); return }
                 if m.elongation < 1.25 { self.note("No clear direction (shape is nearly square or round)"); return }
-                self.detected = true; self.cancelArmed = true
+                self.detected = true
                 self.note("Seen at \(angleText((m.axis * 10).rounded() / 10))° (\(angleText((abs(m.tilt) * 10).rounded() / 10))° off straight). Level straightens it.")
             }
         }
@@ -697,7 +703,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 return
             }
             let r = rotateSelection(by: -m.tilt)
+            let ch = noteBaseline()
             DispatchQueue.main.async {
+                self.cancelRed = ch
                 if r.error == nil { self.levelled = (self.levelled ?? 0) + m.tilt; self.detected = false }
                 self.show(r)
                 if r.error == nil { self.note("Levelled by \(angleText((-m.tilt * 10).rounded() / 10))°. Edit, then press Restore.") }
@@ -711,7 +719,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             self.pending = 0
             let r = cancelToBaseline()
             DispatchQueue.main.async {
-                if r.error == nil { self.levelled = nil; self.detected = false; self.cancelArmed = false }
+                self.cancelRed = false
+                if r.error == nil { self.levelled = nil; self.detected = false }
                 self.show(r)
                 self.note(r.error ?? "Cancelled: back to the angle it had when selected")
             }
@@ -724,8 +733,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         queue.async {
             self.pending = 0
             let r = rotateSelection(by: t)
+            let ch = noteBaseline()
             DispatchQueue.main.async {
-                if r.error == nil { self.levelled = nil; self.cancelArmed = false }
+                self.cancelRed = ch
+                if r.error == nil { self.levelled = nil }
                 self.show(r)
                 if r.error == nil { self.note("Restored to its original angle") }
             }
@@ -739,7 +750,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         queue.async {
             self.pending = 0
             let r = rotateSelection(by: a, absolute: true)
+            let ch = noteBaseline()
             DispatchQueue.main.async {
+                self.cancelRed = ch
                 self.show(r)
             }
         }
@@ -754,7 +767,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             while self.pending != 0 {
                 let d = self.pending; self.pending = 0
                 let r = rotateSelection(by: d)
+                let ch = noteBaseline()
                 DispatchQueue.main.async {
+                    self.cancelRed = ch
                     self.show(r)
                 }
             }

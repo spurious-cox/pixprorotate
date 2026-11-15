@@ -97,12 +97,12 @@ deal with that, so you can edit an angled item straight and then put it back:
    remembers how far it turned. Now it is easy to edit.
 3. **Restore** turns it back by exactly that amount.
 
-The button to press next is colored: nothing is colored until you press
-Detect, then Level is, then Restore, and after Restore the colors clear.
+The button to press next is green: Detect, then Level, then Restore, then back
+to Detect.
 
 **Cancel** is the way out when changes get out of hand: it puts the selected
 layer back to the angle it had when you selected it, whatever you did since
-(arrow keys, typed angles, presets, Level, Restore), and clears the colors. Cancel is colored from Detect until you press it (or Restore finishes the round). If
+(arrow keys, typed angles, presets, Level, Restore), . **Cancel** lights up red whenever the selected layer is no longer at that starting angle, and goes plain again once it is. If
 you select a different layer, that layer's angle becomes the new starting point.
 
 Detect and Level work on **one layer at a time**. A group counts as one layer,
