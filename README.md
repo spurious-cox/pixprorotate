@@ -52,8 +52,8 @@ Accessibility access (below) the arrow keys work without clicking the panel.
 * **Right arrow or Up arrow** — add 1 degree (turn clockwise)
 * **Left arrow or Down arrow** — subtract 1 degree (turn counterclockwise)
 * **Tap an arrow key** — exactly one step (1 degree)
-* **Hold an arrow key** — after a brief pause it keeps turning, and turns faster the longer you hold, until you let go; always whole degrees except with Option
-* **Shift + arrow** — faster, 3 degrees a step (about 90 degrees a second when held)
+* **Hold an arrow key** — after a brief pause it keeps turning, and turns faster the longer you hold, but **never more than 10 degrees in one press**; it stops there until you let go and press again. Always whole degrees except with Option
+* **Shift + arrow** — faster, 3 degrees a step (still stops at 10 degrees a press)
 * **Option + arrow** — fine, 0.1 degree a step
 * **Number keys, keypad and decimal point** (0-9, `.`, and `-`) — type an angle into the angle box, even
   while Pixelmator Pro is the active app. The first digit starts a new number.
@@ -95,7 +95,7 @@ deal with that, so you can edit an angled item straight and then put it back:
    line, with how far it is from straight. It does not change anything.
 2. **Level** turns the layer to the nearest horizontal or vertical and
    remembers how far it turned. Now it is easy to edit.
-3. **Restore** turns it back by exactly that amount.
+3. **Restore** turns it back by exactly that amount; if the leveled item is no longer selected (you clicked inside the group, say) it tells you so instead of turning something else.
 
 The button to press next is green: Detect, then Level, then Restore, then back
 to Detect.

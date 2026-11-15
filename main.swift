@@ -265,6 +265,25 @@ func noteBaseline() -> Bool {
         return d > 0.05 }
 }
 
+/// Ids of the layers selected right now (without touching the saved baseline).
+func selectionIDs() -> Set<String> {
+    guard let id = runningPixelmatorID() else { return [] }
+    let src = """
+    tell application id "\(id)"
+        if (count of documents) is 0 then return ""
+        set out to ""
+        set sel to selected layers of front document
+        repeat with i from 1 to count of sel
+            set out to out & (id of (item i of sel)) & ";"
+        end repeat
+        return out
+    end tell
+    """
+    var err: NSDictionary?
+    guard let r = NSAppleScript(source: src)?.executeAndReturnError(&err), err == nil, let t = r.stringValue else { return [] }
+    return Set(t.split(separator: ";").map(String.init))
+}
+
 /// Puts every selected layer back to the angle it had when first selected.
 func cancelToBaseline() -> (angle: Double?, error: String?) {
     guard let id = runningPixelmatorID() else { return (nil, "Pixelmator Pro is not running") }
@@ -449,7 +468,9 @@ func angleText(_ a: Double) -> String {
 final class KeyRotator {
     static let shared = KeyRotator()
     var onRotate: ((Double) -> Void)?
-    private struct Hold { var step: Double; var since: Date; var fine: Bool; var carry = 0.0 }
+    private struct Hold { var step: Double; var since: Date; var fine: Bool; var carry = 0.0; var moved = 0.0 }
+    /// One press never turns more than this many degrees in total, however long the key is held.
+    static let pressLimit = 10.0
     private var held: [Int64: Hold] = [:]   // keyCode -> signed step per tick, press time, fractional carry
     private var timer: Timer?
 
@@ -463,7 +484,7 @@ final class KeyRotator {
         if down {
             if isRepeat { return }
             let step: Double = shift ? 3 : option ? 0.1 : 1
-            held[code] = Hold(step: sign * step, since: Date(), fine: option)
+            held[code] = Hold(step: sign * step, since: Date(), fine: option, moved: step)
             onRotate?(sign * step)   // a tap is exactly one step
             if timer == nil {
                 let t = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
@@ -476,11 +497,15 @@ final class KeyRotator {
                     var total = 0.0
                     for (k, var h) in self.held {
                         let t = now.timeIntervalSince(h.since) - 0.4
-                        guard t > 0 else { continue }
+                        guard t > 0, h.moved < KeyRotator.pressLimit - 1e-9 else { continue }
                         h.carry += h.step * min(3, 1 + t * 1.5)
                         let unit = h.fine ? 0.1 : 1.0
-                        let whole = (h.carry / unit).rounded(.towardZero) * unit
+                        var whole = (h.carry / unit).rounded(.towardZero) * unit
                         h.carry -= whole
+                        // Stop at the limit: trim the last step so the press ends exactly at 10 degrees.
+                        let room = KeyRotator.pressLimit - h.moved
+                        if abs(whole) > room { whole = (whole < 0 ? -room : room); h.carry = 0 }
+                        h.moved += abs(whole)
                         total += whole
                         self.held[k] = h
                     }
@@ -594,6 +619,20 @@ final class ArrowTap {
     }
 }
 
+/// A button that keeps its color even while the panel is not the key window (the stock bezel color goes gray then).
+final class TintButton: NSButton {
+    var tint: NSColor? { didSet { needsDisplay = true } }
+    override func draw(_ r: NSRect) {
+        guard let c = tint else { super.draw(r); return }
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 2), xRadius: 6, yRadius: 6)
+        (isHighlighted ? c.blended(withFraction: 0.25, of: .black) ?? c : c).setFill(); path.fill()
+        let p = NSMutableParagraphStyle(); p.alignment = .center
+        let a: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.white, .paragraphStyle: p]
+        let h = (title as NSString).size(withAttributes: a).height
+        (title as NSString).draw(in: NSRect(x: 0, y: (bounds.height - h) / 2, width: bounds.width, height: h), withAttributes: a)
+    }
+}
+
 final class RotatePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override func sendEvent(_ e: NSEvent) {
@@ -684,7 +723,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         field.delegate = self
         field.target = self
         field.action = #selector(fieldEntered)
-        let hint = NSTextField(labelWithString: "→ ↑  +1°      ← ↓  −1°      hold to keep turning\n⇧ faster      ⌥ fine")
+        let hint = NSTextField(labelWithString: "→ ↑  +1°      ← ↓  −1°      hold to turn, up to 10° a press\n⇧ faster      ⌥ fine")
         hint.font = .systemFont(ofSize: 11); hint.textColor = .secondaryLabelColor; hint.alignment = .center
         status.font = .systemFont(ofSize: 11); status.textColor = .secondaryLabelColor; status.alignment = .center
         // A long message (an Apple event error, say) must never widen the window: it truncates instead.
@@ -856,7 +895,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     /// Amount Level turned the item (clockwise degrees), kept so Restore can undo exactly that much.
     var levelled: Double? { didSet { colorNext() } }
-    let detectBtn = NSButton(), levelBtn = NSButton(), restoreBtn = NSButton(), cancelBtn = NSButton()
+    var levelledIDs: Set<String> = []   // the layers Level turned, so Restore can tell if they are still selected
+    let detectBtn = TintButton(), levelBtn = TintButton(), restoreBtn = TintButton(), cancelBtn = TintButton()
     /// Cancel is red whenever the selection is no longer at the angle it had when selected.
     var cancelRed = false { didSet { if cancelRed != oldValue { colorNext() } } }
     var detected = false { didSet { colorNext() } }
@@ -866,9 +906,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let next: NSButton = levelled != nil ? restoreBtn : detected ? levelBtn : detectBtn
         for b in [detectBtn, levelBtn, restoreBtn, cancelBtn] {
             let color: NSColor? = b === cancelBtn ? (cancelRed ? .systemRed : nil) : (b === next ? .systemGreen : nil)
-            let on = color != nil
-            b.bezelColor = color
-            b.contentTintColor = on ? .white : nil
+            b.tint = color
         }
     }
 
@@ -913,11 +951,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 DispatchQueue.main.async { if m == nil { self.reportError(e) } else { self.note("No clear direction to level") } }
                 return
             }
+            let ids = selectionIDs()
             let r = rotateSelection(by: -m.tilt)
             let ch = noteBaseline() || groupChanged()
             DispatchQueue.main.async {
                 self.cancelRed = ch
-                if r.error == nil { self.levelled = (self.levelled ?? 0) + m.tilt; self.detected = false }
+                if r.error == nil { self.levelled = (self.levelled ?? 0) + m.tilt; self.levelledIDs = ids; self.detected = false }
                 self.show(r)
                 if r.error == nil { self.note("Levelled by \(angleText((-m.tilt * 10).rounded() / 10))°. Edit, then press Restore.") }
             }
@@ -946,6 +985,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         guard let t = levelled else { note("Nothing to restore (Level first)"); return }
         queue.async {
             self.pending = 0
+            if selectionIDs() != self.levelledIDs {
+                DispatchQueue.main.async { self.note("The leveled item is not selected. Select it again to Restore, or press Cancel.") }
+                return
+            }
             let r = rotateSelection(by: t)
             let ch = noteBaseline() || groupChanged()
             DispatchQueue.main.async {
