@@ -314,6 +314,23 @@ func noteBaseline() -> Bool {
         return d > 0.05 }
 }
 
+/// True when Pixelmator Pro's Edit > Undo item is available (read from its menu bar through Accessibility).
+func pixelmatorCanUndo() -> Bool {
+    guard AXIsProcessTrusted(), let pid = pixelmatorApp()?.processIdentifier else { return false }
+    func attr(_ e: AXUIElement, _ n: String) -> CFTypeRef? { var v: CFTypeRef?; return AXUIElementCopyAttributeValue(e, n as CFString, &v) == .success ? v : nil }
+    let app = AXUIElementCreateApplication(pid)
+    guard let bar = attr(app, "AXMenuBar") else { return false }
+    for top in (attr(bar as! AXUIElement, "AXChildren") as? [AXUIElement]) ?? [] where (attr(top, "AXTitle") as? String) == "Edit" {
+        for menu in (attr(top, "AXChildren") as? [AXUIElement]) ?? [] {
+            for item in (attr(menu, "AXChildren") as? [AXUIElement]) ?? [] {
+                let t = attr(item, "AXTitle") as? String ?? ""
+                if t == "Undo" || t.hasPrefix("Undo ") { return (attr(item, "AXEnabled") as? Bool) ?? false }
+            }
+        }
+    }
+    return false
+}
+
 /// Ids of the layers selected right now (without touching the saved baseline).
 func selectionIDs() -> Set<String> {
     guard let id = runningPixelmatorID() else { return [] }
@@ -676,7 +693,7 @@ final class TintButton: NSButton {
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 2), xRadius: 6, yRadius: 6)
         (isHighlighted ? c.blended(withFraction: 0.25, of: .black) ?? c : c).setFill(); path.fill()
         let p = NSMutableParagraphStyle(); p.alignment = .center
-        let a: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.white, .paragraphStyle: p]
+        let a: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: (c == NSColor.systemYellow ? NSColor.black : NSColor.white), .paragraphStyle: p]
         let h = (title as NSString).size(withAttributes: a).height
         (title as NSString).draw(in: NSRect(x: 0, y: (bounds.height - h) / 2, width: bounds.width, height: h), withAttributes: a)
     }
@@ -927,13 +944,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             if self.draining || self.pending != 0 { return }
             let ch = noteBaseline() || groupChanged()
             let r = readAngle()
+            let canUndo = pixelmatorCanUndo()
             // Nothing selected (or no document): the round is over, so drop the backup copy and the saved angles.
             let none = r.error == "No layer is selected" || r.error == "No document is open"
             if none && (snapshot != nil || !baseline.isEmpty) { dropSnapshot(); baseline = [:] }
             if none { lastRevealed = "" }
             else if baseline.count == 1, let k = baseline.keys.first, k != lastRevealed { lastRevealed = k; revealInSidebar() }
             DispatchQueue.main.async {
-                self.noSelection = none
+                self.noSelection = none; self.undoAvailable = canUndo
                 if none { self.levelled = nil; self.detected = false; self.cancelRed = false } else { self.cancelRed = ch }
                 self.show(r, force: force)
             }
@@ -962,20 +980,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     /// Amount Level turned the item (clockwise degrees), kept so Restore can undo exactly that much.
     var levelled: Double? { didSet { colorNext() } }
     var levelledIDs: Set<String> = []   // the layers Level turned, so Restore can tell if they are still selected
-    let detectBtn = TintButton(), levelBtn = TintButton(), restoreBtn = TintButton(), cancelBtn = TintButton(), undoBtn = NSButton()
+    let detectBtn = TintButton(), levelBtn = TintButton(), restoreBtn = TintButton(), cancelBtn = TintButton(), undoBtn = TintButton()
     /// Cancel is red whenever the selection is no longer at the angle it had when selected.
     var cancelRed = false { didSet { if cancelRed != oldValue { colorNext() } } }
     var detected = false { didSet { colorNext() } }
     /// A preset (0, 90, 180, 270) was chosen on purpose, so the guide colors stay off until the next Detect.
     var colorsOff = false { didSet { colorNext() } }
     /// Nothing is selected in Pixelmator Pro: every button light is off until something is.
+    /// Pixelmator Pro has something to undo (yellow Undo button).
+    var undoAvailable = false { didSet { if undoAvailable != oldValue { colorNext() } } }
     var noSelection = false { didSet { if noSelection != oldValue { colorNext() } } }
 
     /// Green marks the button to press next: Detect, then Level, then Restore, then Detect again. Cancel is red once something changed.
     func colorNext() {
         let next: NSButton = levelled != nil ? restoreBtn : detected ? levelBtn : detectBtn
-        for b in [detectBtn, levelBtn, restoreBtn, cancelBtn] {
-            let color: NSColor? = (colorsOff || noSelection) ? nil : b === cancelBtn ? (cancelRed ? .systemRed : nil) : (b === next ? .systemGreen : nil)
+        for b in [detectBtn, levelBtn, undoBtn, restoreBtn, cancelBtn] {
+            let color: NSColor? = (colorsOff || noSelection) ? nil : b === undoBtn ? (undoAvailable ? .systemYellow : nil) : b === cancelBtn ? (cancelRed ? .systemRed : nil) : (b === next ? .systemGreen : nil)
             b.tint = color
         }
     }
