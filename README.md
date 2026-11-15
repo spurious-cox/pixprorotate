@@ -86,7 +86,26 @@ because angles are kept between 0 and 360.
 
 ### Detect, Level and Restore
 
-Pixelmator Pro reports a drawn diagonal line (or anything imported from SVG) as rotation 0, because the angle is in its shape. **Detect** measures the angle you can actually see: it copies the selection, finds the long axis of the pixels, and shows it in the message line, with how far it is from straight. **Level** turns the selection to the nearest horizontal or vertical and remembers how far it turned. **Restore** turns it back by exactly that amount. Your clipboard is put back after each measurement. Round or square shapes have no clear direction, so Level leaves them alone.
+Pixelmator Pro reports a drawn diagonal line (or anything imported from SVG) as
+rotation 0, because the angle is in its shape, not in a setting. Three buttons
+deal with that, so you can edit an angled item straight and then put it back:
+
+1. **Detect** measures the angle you can actually see. It copies the selected
+   layer, finds the long axis of its pixels, and shows the result in the message
+   line, with how far it is from straight. It does not change anything.
+2. **Level** turns the layer to the nearest horizontal or vertical and
+   remembers how far it turned. Now it is easy to edit.
+3. **Restore** turns it back by exactly that amount.
+
+The button to press next is colored: nothing is colored until you press
+Detect, then Level is, then Restore, and after Restore the colors clear.
+
+Detect and Level work on **one layer at a time**. A group counts as one layer,
+so a line made of a shaft and an arrowhead is fine. If several layers are
+selected, a dialog says so; select a single layer, or group the items first.
+Round or square shapes have no clear direction, so Level leaves them alone. Your
+clipboard is put back after each measurement, and the angle is accurate to a
+fraction of a degree.
 
 ### Presets
 
@@ -96,7 +115,8 @@ The **0°**, **90°**, **180°** and **270°** buttons set the angle outright.
 
 Every selected layer is turned by the same step, so they keep their relative
 angles. The box shows the first selected layer's angle. The presets and typed
-angles set every selected layer to the same angle.
+angles set every selected layer to the same angle. Detect and Level are the
+exception: they need a single layer (see above).
 
 ## Permission
 
@@ -107,6 +127,10 @@ Allow it; that is how it reads and sets layer angles.
 
 * "No layer is selected" or "No document is open" appears under the angle box
   when Pixelmator Pro has nothing to rotate.
+* "Select a single layer to measure" appears when Detect or Level is pressed
+  with several layers selected.
+* "No clear direction" means the shape is nearly square or round, so it has no
+  long axis to level.
 * If the arrow keys still nudge the object, PixProRotate has no Accessibility access yet, or the
   checkbox in the panel is off.
 * A log of launches, quits and every rotation (document, layer type, selection
