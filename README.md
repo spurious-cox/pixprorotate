@@ -102,8 +102,10 @@ to Detect.
 
 **Cancel** is the way out when changes get out of hand: it puts the selected
 layer back to the angle it had when you selected it, whatever you did since
-(arrow keys, typed angles, presets, Level, Restore), . **Cancel** lights up red whenever the selected layer is no longer at that starting angle, and goes plain again once it is. If
-you select a different layer, that layer's angle becomes the new starting point.
+(arrow keys, typed angles, presets, Level, Restore). It lights up red whenever
+the layer is no longer at that starting angle, and goes plain again once it is.
+If you select a different layer, that layer's angle becomes the new starting
+point.
 
 Detect and Level work on **one layer at a time**. A group counts as one layer,
 so a line made of a shaft and an arrowhead is fine. If several layers are
