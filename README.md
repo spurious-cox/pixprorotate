@@ -98,7 +98,9 @@ deal with that, so you can edit an angled item straight and then put it back:
 3. **Restore** turns it back by exactly that amount; if the leveled item is no longer selected (you clicked inside the group, say) it tells you so instead of turning something else.
 
 The button to press next is green: Detect, then Level, then Restore, then back
-to Detect.
+to Detect. Choosing a preset (0°, 90°, 180°, 270°) turns all the colors off until
+you press Detect again. When nothing is selected, the round is abandoned: the
+backup copy of a group is deleted and the saved starting angles are forgotten.
 
 **Cancel** is the way out when changes get out of hand: it puts the selected
 layer back to the angle it had when you selected it, whatever you did since
@@ -113,7 +115,7 @@ group, PixProRotate first makes a hidden copy of it right beside it, named
 "PixProRotate backup". Cancel swaps the original back for that copy, whatever you
 changed inside. Cancel also goes red when the group's size, position, rotation or
 direct contents no longer match the copy. The copy is deleted when you start on a
-different group or quit PixProRotate; if you save the document in between, the
+different group, when nothing is selected, or when you quit PixProRotate; if you save the document in between, the
 hidden copy is saved with it, so delete it by hand if you do not want it. Edits
 that change nothing the copy can compare (for example a path reshaped inside the
 same outline) do not turn Cancel red, but Cancel still restores them.

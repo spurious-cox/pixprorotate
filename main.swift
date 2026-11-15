@@ -870,7 +870,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             if self.draining || self.pending != 0 { return }
             let ch = noteBaseline() || groupChanged()
             let r = readAngle()
-            DispatchQueue.main.async { self.cancelRed = ch; self.show(r, force: force) }
+            // Nothing selected (or no document): the round is over, so drop the backup copy and the saved angles.
+            let none = r.error == "No layer is selected" || r.error == "No document is open"
+            if none && (snapshot != nil || !baseline.isEmpty) { dropSnapshot(); baseline = [:] }
+            DispatchQueue.main.async {
+                if none { self.levelled = nil; self.detected = false; self.cancelRed = false } else { self.cancelRed = ch }
+                self.show(r, force: force)
+            }
         }
     }
 
@@ -900,12 +906,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     /// Cancel is red whenever the selection is no longer at the angle it had when selected.
     var cancelRed = false { didSet { if cancelRed != oldValue { colorNext() } } }
     var detected = false { didSet { colorNext() } }
+    /// A preset (0, 90, 180, 270) was chosen on purpose, so the guide colors stay off until the next Detect.
+    var colorsOff = false { didSet { colorNext() } }
 
     /// Green marks the button to press next: Detect, then Level, then Restore, then Detect again. Cancel is red once something changed.
     func colorNext() {
         let next: NSButton = levelled != nil ? restoreBtn : detected ? levelBtn : detectBtn
         for b in [detectBtn, levelBtn, restoreBtn, cancelBtn] {
-            let color: NSColor? = b === cancelBtn ? (cancelRed ? .systemRed : nil) : (b === next ? .systemGreen : nil)
+            let color: NSColor? = colorsOff ? nil : b === cancelBtn ? (cancelRed ? .systemRed : nil) : (b === next ? .systemGreen : nil)
             b.tint = color
         }
     }
@@ -928,6 +936,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     @objc func detectPressed() {
         dirty = false; panel.makeFirstResponder(nil)
+        colorsOff = false
         note("Measuring…")
         queue.async {
             ensureSnapshot()
@@ -943,6 +952,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     @objc func levelPressed() {
         dirty = false; panel.makeFirstResponder(nil)
+        colorsOff = false
         queue.async {
             self.pending = 0
             ensureSnapshot()
@@ -1000,7 +1010,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
     }
 
-    @objc func presetPressed(_ b: NSButton) { dirty = false; panel.makeFirstResponder(nil); setAngle(Double(b.tag)) }
+    @objc func presetPressed(_ b: NSButton) {
+        dirty = false; panel.makeFirstResponder(nil)
+        levelled = nil; detected = false; colorsOff = true
+        setAngle(Double(b.tag))
+    }
 
     /// Sets every selected layer to an absolute angle (0, 90, 180, 270 presets).
     func setAngle(_ a: Double) {
